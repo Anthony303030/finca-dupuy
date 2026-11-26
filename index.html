@@ -46,6 +46,9 @@
   .seg button.on{background:#1f3b2c;color:#fff}
   .lotebox{border-top:5px solid var(--com)} .lotebox.pur{border-top-color:var(--pur)}
   .lotebox h3{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+  .intro{font-size:15px;line-height:1.6;margin:0 0 12px}
+  tr.tot td{font-weight:700;border-top:2px solid var(--ink)}
+  .lbl.big{font-size:10px;font-weight:600;text-align:center;line-height:1.25;white-space:nowrap}
   .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
   .kpi{background:#f6f7f4;border-radius:8px;padding:8px 10px}
   .kpi b{display:block;font-size:18px}
@@ -62,6 +65,13 @@
   <div class="sub" id="act">Cargando…</div>
 </header>
 <main>
+  <section class="panel">
+    <h2>Resumen de la finca</h2>
+    <p class="intro" id="intro"></p>
+    <div class="scroll"><table><thead><tr><th>Uso</th><th class="num">Potreros</th><th class="num">Tareas</th><th class="num">Hectáreas</th><th class="num">Cabezas</th><th class="num">Cab/tarea</th><th class="num">Cab/ha</th></tr></thead>
+      <tbody id="resumen"></tbody></table></div>
+  </section>
+
   <section class="cards" id="cards"></section>
 
   <section class="panel">
@@ -71,6 +81,7 @@
       <button data-v="com">🐄 Comercial</button>
       <button data-v="pur">🐄 Puro</button>
     </div>
+    <div style="font-size:12px;color:var(--mut);margin:-4px 0 8px">Acércate al mapa para ver la etiqueta completa de cada potrero, o tócalo para ver sus datos.</div>
     <div id="map"></div>
   </section>
 
@@ -178,8 +189,34 @@ async function cargar(){
     card('', 'Lluvia 30 días', `${r0(suma(30))} mm`, `60 días: ${r0(suma(60))} mm`) +
     card('', 'Potreros listos', listos, `≥ ${m.dias_descanso} días y ≥ ${m.mm_minimo} mm útiles`);
 
+  // ---- Resumen de la finca
+  const cabC = +(m.cabezas_comercial || 340), cabP = +(m.cabezas_puro || 64);
+  const haDe = p => p.ha != null && p.ha !== '' ? +p.ha : (+p.tareas || 0) / 15.9;
+  const grupos = [
+    ['Ganado comercial', p => esCom(p.tipo), cabC],
+    ['Ganado puro', p => esPuro(p.tipo), cabP],
+    ['Caña', p => (p.tipo||'').toLowerCase().includes('caña'), null],
+    ['Otros', p => !esGanado(p.tipo) && !(p.tipo||'').toLowerCase().includes('caña'), null]];
+  const g1 = x => x == null || isNaN(x) ? '—' : (Math.round(x * 10) / 10).toLocaleString('es-DO');
+  let filas = '', tot = {n:0, ta:0, ha:0}, past = {n:0, ta:0, ha:0};
+  grupos.forEach(([nom, f, cab]) => { const ps = d.potreros.filter(f); if (!ps.length) return;
+    const ta = ps.reduce((a,p) => a + (+p.tareas||0), 0), ha = ps.reduce((a,p) => a + haDe(p), 0);
+    tot.n += ps.length; tot.ta += ta; tot.ha += ha;
+    if (cab) { past.n += ps.length; past.ta += ta; past.ha += ha; }
+    filas += `<tr><td>${nom}</td><td class="num">${ps.length}</td><td class="num">${g1(ta)}</td><td class="num">${g1(ha)}</td>
+      <td class="num">${cab ?? '—'}</td><td class="num">${cab ? g1(cab/ta) : '—'}</td><td class="num">${cab ? g1(cab/ha) : '—'}</td></tr>`; });
+  filas += `<tr class="tot"><td>Total pastoreo</td><td class="num">${past.n}</td><td class="num">${g1(past.ta)}</td><td class="num">${g1(past.ha)}</td>
+    <td class="num">${cabC + cabP}</td><td class="num">${g1((cabC+cabP)/past.ta)}</td><td class="num">${g1((cabC+cabP)/past.ha)}</td></tr>`;
+  if (tot.n !== past.n) filas += `<tr><td>Total finca</td><td class="num">${tot.n}</td><td class="num">${g1(tot.ta)}</td><td class="num">${g1(tot.ha)}</td><td></td><td></td><td></td></tr>`;
+  document.getElementById('resumen').innerHTML = filas;
+  document.getElementById('intro').innerHTML =
+    `${m.finca || 'La finca'} tiene <b>${past.n} potreros de pastoreo</b> con <b>${g1(past.ta)} tareas (${g1(past.ha)} ha)</b>, donde se manejan <b>${cabC + cabP} cabezas</b> en dos lotes rotando: ` +
+    `<b>ganado comercial (${cabC})</b>${uc ? `, hoy en el potrero ${uc.pot ?? '—'}` : ''}, y <b>ganado puro (${cabP})</b>${up ? `, hoy en el potrero ${up.pot ?? '—'}` : ''}. ` +
+    `En los últimos 30 días llovieron <b>${r0(suma(30))} mm</b>. Hay <b>${listos} potrero${listos === 1 ? '' : 's'} listo${listos === 1 ? '' : 's'}</b> para recibir ganado.`;
+
+  const f1 = x => x == null || x === '' || isNaN(x) ? '—' : (Math.round(x * 10) / 10).toLocaleString('es-DO');
   // ---- Mapa
-  const map = L.map('map', {zoomControl:true});
+  const map = L.map('map', {zoomControl:true}); window._map = map;
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {maxZoom:19, attribution:'Imagen © Esri'}).addTo(map);
   const grupo = {com:L.layerGroup(), pur:L.layerGroup(), otro:L.layerGroup()};
@@ -194,6 +231,7 @@ async function cargar(){
       Último ganado: ${fd(p.ug)}<br>Descanso: ${p.dias ?? '—'} días<br>
       Lluvia desde salida: ${r0(p.lluvia)} mm (útil ${r0(p.util)})${p.listo === 'SI' ? '<br><b style="color:#1a7a3a">✅ Listo para entrar</b>' : ''}`);
     ly.bindTooltip(String(p.n), {permanent:true, direction:'center', className:'lbl'});
+    ly._p = p;
     ly.addTo(grupo[tipoDe(p.tipo)]); todas.push(ly);
   });
   const puntos = {com:L.layerGroup(), pur:L.layerGroup()};
@@ -218,8 +256,27 @@ async function cargar(){
     map.fitBounds(fg.getLayers().length ? fg.getBounds() : bounds, {padding:[10,10]});
   }
   document.querySelectorAll('#seg button').forEach(b => b.onclick = () => ver(b.dataset.v));
+  const fSiembra = v => { if (!v) return ''; const t = String(v).replace(/\//g,'-'); return /^\d{4}-\d{2}-\d{2}/.test(t) ? fd(t) : v; };
+  const etiqueta = p => {
+    const l = [];
+    if (p.estado === 'C0') l.push('🐄 COMERCIAL AQUÍ'); if (p.estado === 'P0') l.push('🐄 PURO AQUÍ');
+    l.push(`<b>${p.n}</b>`, `${f1(p.tareas)} tareas`);
+    if (p.siembra) l.push(`FS: ${fSiembra(p.siembra)}`);
+    if (p.ug) l.push(`UG: ${fd(p.ug)}`, `Descanso: ${p.dias ?? '—'} días`, `Lluvia: ${r0(p.lluvia)} mm (útil ${r0(p.util)})`);
+    if (p.listo === 'SI') l.push('✅ LISTO');
+    return l.join('<br>');
+  };
+  const ZOOM_DETALLE = 17;
+  function etiquetas(){
+    const det = map.getZoom() >= ZOOM_DETALLE;
+      todas.forEach(ly => { ly.setTooltipContent(det ? etiqueta(ly._p) : String(ly._p.n));
+      const el = ly.getTooltip && ly.getTooltip() && ly.getTooltip().getElement();
+      if (el) el.classList.toggle('big', det); });
+  }
+  map.on('zoomend', etiquetas);
   map.fitBounds(bounds, {padding:[10,10]});
   ver('todo');
+  etiquetas();
   const ley = L.control({position:'bottomright'});
   ley.onAdd = () => { const div = L.DomUtil.create('div','legend' + (innerWidth < 600 ? ' min' : '')); div.onclick = () => div.classList.toggle('min'); div.innerHTML =
     `<div><b>Leyenda</b> ▾</div><div><i style="border:3px solid #ff0"></i>Ganado hoy</div>
@@ -249,7 +306,6 @@ async function cargar(){
   // ---- Por lote
   const dif = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
   const potDe = x => (x.pid != null && d.potreros[x.pid]) ? d.potreros[x.pid] : null;
-  const f1 = x => x == null || isNaN(x) ? '—' : (Math.round(x * 10) / 10).toLocaleString('es-DO');
   const lim = restaDias(hoy, 9), lim30 = restaDias(hoy, 30);
   [['com', esCom, uc, +(m.cabezas_comercial || 340)], ['pur', esPuro, up, +(m.cabezas_puro || 64)]].forEach(([k, f, u, cab]) => {
     const pots = d.potreros.filter(p => f(p.tipo));
