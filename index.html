@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finca Dupuy · Control de pastoreo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#f4f5f2;--card:#fff;--ink:#1f2a1f;--mut:#6b756b;--line:#e2e5df;
+        --com:#d7191c;--pur:#08519c;--ok:#1a9850;--warn:#f2c200}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{background:#1f3b2c;color:#fff;padding:18px 20px}
+  header h1{margin:0;font-size:22px;font-weight:650}
+  header .sub{opacity:.8;font-size:13px;margin-top:4px}
+  main{max-width:1200px;margin:0 auto;padding:16px;display:grid;gap:16px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+  .card .v{font-size:26px;font-weight:700;margin-top:4px}
+  .card .s{font-size:13px;color:var(--mut);margin-top:2px}
+  .lote{border-left:6px solid var(--com)} .lote.puro{border-left-color:var(--pur)}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .panel h2{font-size:16px;margin:0 0 10px}
+  #map{height:560px;border-radius:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:860px){.grid2{grid-template-columns:1fr} #map{height:440px}}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+  th.num{text-align:right}
+  .scroll{max-height:380px;overflow:auto}
+  @media(max-width:600px){.legend{font-size:10px;line-height:1.4;padding:5px 7px} .legend.min div:not(:first-child){display:none} .lbl{font-size:9px}}
+  th{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.03em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+  .tag.com{background:#fde3e3;color:#a50f15} .tag.pur{background:#deebf7;color:#08519c}
+  .tag.ok{background:#d9f0d3;color:#1a7a3a} .tag.no{background:#eee;color:#666}
+  .legend{background:#fff;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+  .legend i{display:inline-block;width:14px;height:10px;margin-right:6px;vertical-align:middle;border:1px solid #0003}
+  .lbl{background:rgba(255,255,255,.85);border:0;box-shadow:none;font-size:11px;font-weight:700;padding:1px 4px}
+  footer{text-align:center;color:var(--mut);font-size:12px;padding:10px 0 24px}
+  .err{background:#fde3e3;color:#a50f15;padding:12px;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titulo">Finca Dupuy · Control de pastoreo</h1>
+  <div class="sub" id="act">Cargando…</div>
+</header>
+<main>
+  <section class="cards" id="cards"></section>
+
+  <section class="panel">
+    <h2>Mapa de rotación</h2>
+    <div id="map"></div>
+  </section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Lluvia diaria (mm)</h2>
+      <div style="position:relative;height:260px"><canvas id="chart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Movimientos del ganado (últimos 14 días)</h2>
+      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Lote</th><th>Potrero</th></tr></thead>
+        <tbody id="movs"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Potreros en descanso</h2>
+    <div class="sub" id="crit" style="color:var(--mut);font-size:13px;margin-bottom:8px"></div>
+    <table><thead><tr><th>Potrero</th><th>Lote</th><th>Salió el ganado</th>
+      <th class="num">Días</th><th class="num">Lluvia (mm)</th><th class="num">Útil (mm)</th><th>Estado</th></tr></thead>
+      <tbody id="desc"></tbody></table>
+  </section>
+</main>
+<footer>Elaborado por INV GLOBAL TRADING GROUP SRL · Datos de campo (QField) y estación meteorológica de la finca</footer>
+
+<script>
+const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sept','oct','nov','dic'];
+const fd = s => { if(!s) return '—'; const [y,m,d] = s.slice(0,10).split('-').map(Number); return `${d} ${MESES[m-1]} ${y}`; };
+const fdc = s => { if(!s) return ''; const [y,m,d] = s.slice(0,10).split('-').map(Number); return `${d} ${MESES[m-1]}`; };
+const hoyISO = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+const restaDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - n); return d.toISOString().slice(0,10); };
+const esCom = t => (t||'').toLowerCase().includes('comercial');
+const esPuro = t => (t||'').toLowerCase().includes('puro');
+const esGanado = t => esCom(t) || esPuro(t);
+const r0 = x => x == null ? '—' : Math.round(x);
+
+const ROJOS = ['#d7191c','#e34a33','#fc8d59','#fdbb84','#fdd49e','#fef0d9'];
+const AZULES = ['#08519c','#3182bd','#6baed6','#9ecae1','#c6dbef','#eff3ff'];
+
+function relleno(p){
+  const e = p.estado || 'OTRO';
+  if (/^C\d$/.test(e)) return {c: ROJOS[+e[1]], o: .7};
+  if (/^P\d$/.test(e)) return {c: AZULES[+e[1]], o: .7};
+  return {c:'#000', o:0};
+}
+function borde(p){
+  if (p.estado === 'C0' || p.estado === 'P0') return {color:'#ffff00', weight:5};
+  if (p.listo === 'SI') return {color:'#00e600', weight:4};
+  if (esCom(p.tipo)) return {color:'#e31a1c', weight:2};
+  if (esPuro(p.tipo)) return {color:'#5a5adc', weight:2};
+  if ((p.tipo||'').toLowerCase().includes('caña')) return {color:'#8b5a2b', weight:1.5};
+  return {color:'#222', weight:1.5};
+}
+
+async function cargar(){
+  let d;
+  try {
+    const r = await fetch('data.json?t=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    d = await r.json();
+  } catch(e) {
+    document.querySelector('main').innerHTML = '<div class="err">Todavía no hay datos publicados. Abre el proyecto en QGIS para que se suba la primera actualización.</div>';
+    document.getElementById('act').textContent = '';
+    return;
+  }
+  const m = d.meta || {};
+  document.getElementById('titulo').textContent = `${m.finca || 'Finca'} · Control de pastoreo`;
+  const [fa, ha] = (m.actualizado || '').split(' ');
+  document.getElementById('act').textContent = `Actualizado: ${fd(fa)}${ha ? ', ' + ha : ''}`;
+
+  // ---- Lluvia
+  const hoy = hoyISO();
+  const suma = n => d.lluvia.filter(x => x.fecha > restaDias(hoy, n)).reduce((a,x) => a + (x.mm||0), 0);
+
+  // ---- Dónde está cada lote
+  const ganado = d.labores.filter(x => esGanado(x.labor));
+  const ultimo = f => ganado.filter(x => f(x.labor)).slice(-1)[0];
+  const desde = (f, pot) => { // fecha de entrada al potrero actual
+    const l = ganado.filter(x => f(x.labor)); let ini = l.length ? l[l.length-1].fecha : null;
+    for (let i = l.length - 1; i >= 0 && l[i].pot === pot; i--) ini = l[i].fecha;
+    return ini;
+  };
+  const card = (cls, k, v, s) => `<div class="card ${cls}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const uc = ultimo(esCom), up = ultimo(esPuro);
+  const loteCard = (u, f, nom, cls) => u
+    ? card(cls, nom, `Potrero ${u.pot ?? '—'}`, `Entró el ${fd(desde(f, u.pot))}`)
+    : card(cls, nom, '—', 'Sin registros recientes');
+  const listos = d.potreros.filter(p => p.listo === 'SI').length;
+  document.getElementById('cards').innerHTML =
+    loteCard(uc, esCom, 'Ganado comercial', 'lote') +
+    loteCard(up, esPuro, 'Ganado puro', 'lote puro') +
+    card('', 'Lluvia 7 días', `${r0(suma(7))} mm`, `Hoy: ${r0(suma(1))} mm`) +
+    card('', 'Lluvia 30 días', `${r0(suma(30))} mm`, `60 días: ${r0(suma(60))} mm`) +
+    card('', 'Potreros listos', listos, `≥ ${m.dias_descanso} días y ≥ ${m.mm_minimo} mm útiles`);
+
+  // ---- Mapa
+  const map = L.map('map', {zoomControl:true});
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19, attribution:'Imagen © Esri'}).addTo(map);
+  const capa = L.geoJSON({type:'FeatureCollection', features: d.potreros.map(p => ({type:'Feature', geometry:p.geom, properties:p}))}, {
+    style: f => { const p = f.properties, r = relleno(p), b = borde(p);
+      return {fillColor:r.c, fillOpacity:r.o, color:b.color, weight:b.weight}; },
+    onEachFeature: (f, ly) => {
+      const p = f.properties, aqui = p.estado === 'C0' ? '🐄 Comercial aquí<br>' : p.estado === 'P0' ? '🐄 Puro aquí<br>' : '';
+      ly.bindPopup(`<b>Potrero ${p.n}</b><br>${aqui}${p.tipo || ''} · ${p.tareas ?? '—'} tareas<br>
+        Último ganado: ${fd(p.ug)}<br>Descanso: ${p.dias ?? '—'} días<br>
+        Lluvia desde salida: ${r0(p.lluvia)} mm (útil ${r0(p.util)})${p.listo === 'SI' ? '<br><b style="color:#1a7a3a">✅ Listo para entrar</b>' : ''}`);
+      ly.bindTooltip(String(p.n), {permanent:true, direction:'center', className:'lbl'});
+    }
+  }).addTo(map);
+  map.fitBounds(capa.getBounds(), {padding:[10,10]});
+  ganado.slice(-10).forEach(x => L.circleMarker([x.lat, x.lon], {radius:6, color:'#fff', weight:2,
+    fillColor: esCom(x.labor) ? '#d7191c' : '#08519c', fillOpacity:1}).bindPopup(`${x.labor}<br>${fd(x.fecha)} · Potrero ${x.pot ?? '—'}`).addTo(map));
+  const ley = L.control({position:'bottomright'});
+  ley.onAdd = () => { const div = L.DomUtil.create('div','legend' + (innerWidth < 600 ? ' min' : '')); div.title='Toca para ver/ocultar'; div.onclick = () => div.classList.toggle('min'); div.innerHTML =
+    `<div><b>Leyenda</b> ▾</div><div><i style="border:3px solid #ff0"></i>Ganado hoy</div>
+     <div><i style="background:${ROJOS[1]}"></i>Comercial (últ. 5 días)</div>
+     <div><i style="background:${AZULES[1]}"></i>Puro (últ. 5 días)</div>
+     <div><i style="border:3px solid #00e600"></i>Listo para entrar</div>`; return div; };
+  ley.addTo(map);
+
+  // ---- Gráfica
+  new Chart(document.getElementById('chart'), {
+    type:'bar',
+    data:{labels:d.lluvia.map(x => fdc(x.fecha)), datasets:[{data:d.lluvia.map(x => x.mm), backgroundColor:'#3182bd', borderRadius:3}]},
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c => `${c.parsed.y} mm`}}},
+      scales:{y:{beginAtZero:true, title:{display:true, text:'mm'}}, x:{ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:10}}}}
+  });
+
+  // ---- Movimientos
+  const lim = restaDias(hoy, 14);
+  document.getElementById('movs').innerHTML = ganado.filter(x => x.fecha >= lim).reverse().map(x =>
+    `<tr><td>${fdc(x.fecha)}</td><td><span class="tag ${esCom(x.labor) ? 'com' : 'pur'}">${esCom(x.labor) ? 'Comercial' : 'Puro'}</span></td><td>${x.pot ?? '—'}</td></tr>`
+  ).join('') || '<tr><td colspan="3">Sin movimientos registrados</td></tr>';
+
+  // ---- Descanso
+  document.getElementById('crit').textContent =
+    `Criterio "listo": ≥ ${m.dias_descanso} días de descanso y ≥ ${m.mm_minimo} mm de lluvia útil (lluvia caída hace más de ${m.dias_respuesta} días).`;
+  const desc = d.potreros.filter(p => p.estado === 'OTRO' && p.ug && esGanado(p.tipo))
+    .sort((a,b) => (b.listo === 'SI') - (a.listo === 'SI') || (b.dias||0) - (a.dias||0));
+  document.getElementById('desc').innerHTML = desc.map(p =>
+    `<tr><td><b>${p.n}</b></td><td><span class="tag ${esCom(p.tipo) ? 'com' : 'pur'}">${esCom(p.tipo) ? 'Comercial' : 'Puro'}</span></td>
+     <td>${fdc(p.ug)}</td><td class="num">${p.dias ?? '—'}</td><td class="num">${r0(p.lluvia)}</td><td class="num">${r0(p.util)}</td>
+     <td>${p.listo === 'SI' ? '<span class="tag ok">✅ Listo</span>' : '<span class="tag no">Descansando</span>'}</td></tr>`
+  ).join('') || '<tr><td colspan="7">Sin datos</td></tr>';
+}
+cargar();
+</script>
+</body>
+</html>
