@@ -40,6 +40,14 @@
   .legend{background:#fff;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.6;box-shadow:0 1px 4px rgba(0,0,0,.25)}
   .legend i{display:inline-block;width:14px;height:10px;margin-right:6px;vertical-align:middle;border:1px solid #0003}
   .lbl{background:rgba(255,255,255,.85);border:0;box-shadow:none;font-size:11px;font-weight:700;padding:1px 4px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+  .seg button{border:0;background:#fff;padding:8px 14px;font-size:14px;cursor:pointer;color:var(--ink)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:#1f3b2c;color:#fff}
+  .lotebox{border-top:5px solid var(--com)} .lotebox.pur{border-top-color:var(--pur)}
+  .lotebox h3{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+  .resumen{font-size:14px;line-height:1.5}
+  .gota{font-size:20px;line-height:20px;text-align:center;filter:drop-shadow(0 0 2px #fff)}
   footer{text-align:center;color:var(--mut);font-size:12px;padding:10px 0 24px}
   .err{background:#fde3e3;color:#a50f15;padding:12px;border-radius:8px}
 </style>
@@ -54,28 +62,38 @@
 
   <section class="panel">
     <h2>Mapa de rotación</h2>
+    <div class="seg" id="seg">
+      <button data-v="todo" class="on">Todo</button>
+      <button data-v="com">🐄 Comercial</button>
+      <button data-v="pur">🐄 Puro</button>
+    </div>
     <div id="map"></div>
   </section>
 
-  <section class="grid2">
-    <div class="panel">
-      <h2>Lluvia diaria (mm)</h2>
-      <div style="position:relative;height:260px"><canvas id="chart"></canvas></div>
-    </div>
-    <div class="panel">
-      <h2>Movimientos del ganado (últimos 14 días)</h2>
-      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Lote</th><th>Potrero</th></tr></thead>
-        <tbody id="movs"></tbody></table></div>
-    </div>
+  <section class="panel">
+    <h2>Lluvia diaria (mm)</h2>
+    <div style="overflow-x:auto"><div style="position:relative;height:320px;min-width:900px"><canvas id="chart"></canvas></div></div>
   </section>
 
-  <section class="panel">
-    <h2>Potreros en descanso</h2>
-    <div class="sub" id="crit" style="color:var(--mut);font-size:13px;margin-bottom:8px"></div>
-    <table><thead><tr><th>Potrero</th><th>Lote</th><th>Salió el ganado</th>
-      <th class="num">Días</th><th class="num">Lluvia (mm)</th><th class="num">Útil (mm)</th><th>Estado</th></tr></thead>
-      <tbody id="desc"></tbody></table>
+  <section class="grid2">
+    <div class="panel lotebox com">
+      <h2>🐄 Ganado Comercial</h2>
+      <div class="resumen" id="res-com"></div>
+      <h3>Dónde ha estado (últimos 10 días)</h3>
+      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Potrero</th></tr></thead><tbody id="movs-com"></tbody></table></div>
+      <h3>Potreros en descanso</h3>
+      <div class="scroll"><table><thead><tr><th>Potrero</th><th>Salió</th><th class="num">Días</th><th class="num">Lluvia</th><th class="num">Útil</th><th>Estado</th></tr></thead><tbody id="desc-com"></tbody></table></div>
+    </div>
+    <div class="panel lotebox pur">
+      <h2>🐄 Ganado Puro</h2>
+      <div class="resumen" id="res-pur"></div>
+      <h3>Dónde ha estado (últimos 10 días)</h3>
+      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Potrero</th></tr></thead><tbody id="movs-pur"></tbody></table></div>
+      <h3>Potreros en descanso</h3>
+      <div class="scroll"><table><thead><tr><th>Potrero</th><th>Salió</th><th class="num">Días</th><th class="num">Lluvia</th><th class="num">Útil</th><th>Estado</th></tr></thead><tbody id="desc-pur"></tbody></table></div>
+    </div>
   </section>
+  <div class="sub" id="crit" style="color:var(--mut);font-size:12px;text-align:center"></div>
 </main>
 <footer>Elaborado por INV GLOBAL TRADING GROUP SRL · Datos de campo (QField) y estación meteorológica de la finca</footer>
 
@@ -153,52 +171,90 @@ async function cargar(){
   const map = L.map('map', {zoomControl:true});
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {maxZoom:19, attribution:'Imagen © Esri'}).addTo(map);
-  const capa = L.geoJSON({type:'FeatureCollection', features: d.potreros.map(p => ({type:'Feature', geometry:p.geom, properties:p}))}, {
-    style: f => { const p = f.properties, r = relleno(p), b = borde(p);
-      return {fillColor:r.c, fillOpacity:r.o, color:b.color, weight:b.weight}; },
-    onEachFeature: (f, ly) => {
-      const p = f.properties, aqui = p.estado === 'C0' ? '🐄 Comercial aquí<br>' : p.estado === 'P0' ? '🐄 Puro aquí<br>' : '';
-      ly.bindPopup(`<b>Potrero ${p.n}</b><br>${aqui}${p.tipo || ''} · ${p.tareas ?? '—'} tareas<br>
-        Último ganado: ${fd(p.ug)}<br>Descanso: ${p.dias ?? '—'} días<br>
-        Lluvia desde salida: ${r0(p.lluvia)} mm (útil ${r0(p.util)})${p.listo === 'SI' ? '<br><b style="color:#1a7a3a">✅ Listo para entrar</b>' : ''}`);
-      ly.bindTooltip(String(p.n), {permanent:true, direction:'center', className:'lbl'});
-    }
-  }).addTo(map);
-  map.fitBounds(capa.getBounds(), {padding:[10,10]});
-  ganado.slice(-10).forEach(x => L.circleMarker([x.lat, x.lon], {radius:6, color:'#fff', weight:2,
-    fillColor: esCom(x.labor) ? '#d7191c' : '#08519c', fillOpacity:1}).bindPopup(`${x.labor}<br>${fd(x.fecha)} · Potrero ${x.pot ?? '—'}`).addTo(map));
+  const grupo = {com:L.layerGroup(), pur:L.layerGroup(), otro:L.layerGroup()};
+  const tipoDe = t => esCom(t) ? 'com' : esPuro(t) ? 'pur' : 'otro';
+  const todas = [];
+  d.potreros.forEach(p => {
+    const r = relleno(p), b = borde(p);
+    const ly = L.geoJSON({type:'Feature', geometry:p.geom, properties:p},
+      {style:{fillColor:r.c, fillOpacity:r.o, color:b.color, weight:b.weight}});
+    const aqui = p.estado === 'C0' ? '🐄 Comercial aquí<br>' : p.estado === 'P0' ? '🐄 Puro aquí<br>' : '';
+    ly.bindPopup(`<b>Potrero ${p.n}</b><br>${aqui}${p.tipo || ''} · ${p.tareas ?? '—'} tareas<br>
+      Último ganado: ${fd(p.ug)}<br>Descanso: ${p.dias ?? '—'} días<br>
+      Lluvia desde salida: ${r0(p.lluvia)} mm (útil ${r0(p.util)})${p.listo === 'SI' ? '<br><b style="color:#1a7a3a">✅ Listo para entrar</b>' : ''}`);
+    ly.bindTooltip(String(p.n), {permanent:true, direction:'center', className:'lbl'});
+    ly.addTo(grupo[tipoDe(p.tipo)]); todas.push(ly);
+  });
+  const puntos = {com:L.layerGroup(), pur:L.layerGroup()};
+  ['com','pur'].forEach(k => ganado.filter(x => k === 'com' ? esCom(x.labor) : esPuro(x.labor)).slice(-10).forEach(x =>
+    L.circleMarker([x.lat, x.lon], {radius:6, color:'#fff', weight:2, fillColor: k === 'com' ? '#d7191c' : '#08519c', fillOpacity:1})
+      .bindPopup(`${x.labor}<br>${fd(x.fecha)} · Potrero ${x.pot ?? '—'}`).addTo(puntos[k])));
+  const beb = L.layerGroup();
+  (d.bebederos || []).forEach(b => {
+    const filas = Object.entries(b.attrs || {}).map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>');
+    L.marker([b.lat, b.lon], {icon: L.divIcon({className:'gota', html:'💧', iconSize:[20,20]})})
+      .bindPopup(filas || 'Bebedero / tanque').addTo(beb);
+  });
+  beb.addTo(map);
+  const bounds = L.featureGroup(todas).getBounds();
+  function ver(v){
+    document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+    ['com','pur','otro'].forEach(k => map.removeLayer(grupo[k]));
+    ['com','pur'].forEach(k => map.removeLayer(puntos[k]));
+    const mostrar = v === 'todo' ? ['com','pur','otro'] : [v];
+    mostrar.forEach(k => { grupo[k].addTo(map); if (puntos[k]) puntos[k].addTo(map); });
+    const fg = L.featureGroup(mostrar.flatMap(k => grupo[k].getLayers()));
+    map.fitBounds(fg.getLayers().length ? fg.getBounds() : bounds, {padding:[10,10]});
+  }
+  document.querySelectorAll('#seg button').forEach(b => b.onclick = () => ver(b.dataset.v));
+  map.fitBounds(bounds, {padding:[10,10]});
+  ver('todo');
   const ley = L.control({position:'bottomright'});
-  ley.onAdd = () => { const div = L.DomUtil.create('div','legend' + (innerWidth < 600 ? ' min' : '')); div.title='Toca para ver/ocultar'; div.onclick = () => div.classList.toggle('min'); div.innerHTML =
+  ley.onAdd = () => { const div = L.DomUtil.create('div','legend' + (innerWidth < 600 ? ' min' : '')); div.onclick = () => div.classList.toggle('min'); div.innerHTML =
     `<div><b>Leyenda</b> ▾</div><div><i style="border:3px solid #ff0"></i>Ganado hoy</div>
      <div><i style="background:${ROJOS[1]}"></i>Comercial (últ. 5 días)</div>
      <div><i style="background:${AZULES[1]}"></i>Puro (últ. 5 días)</div>
-     <div><i style="border:3px solid #00e600"></i>Listo para entrar</div>`; return div; };
+     <div><i style="border:3px solid #00e600"></i>Listo para entrar</div>
+     <div>💧 Bebedero / tanque</div>`; return div; };
   ley.addTo(map);
 
-  // ---- Gráfica
+  // ---- Gráfica (todas las fechas, etiqueta vertical, valor en cada barra)
+  const valores = {id:'valores', afterDatasetsDraw(ch){
+    const {ctx} = ch, meta = ch.getDatasetMeta(0);
+    ctx.save(); ctx.font = '600 10px system-ui, sans-serif'; ctx.fillStyle = '#1f2a1f'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    meta.data.forEach((bar, i) => { const v = ch.data.datasets[0].data[i]; if (!v) return;
+      ctx.save(); ctx.translate(bar.x, bar.y - 4); ctx.rotate(-Math.PI/2); ctx.fillText(String(v), 0, 0); ctx.restore(); });
+    ctx.restore(); }};
+  const maxMm = Math.max(5, ...d.lluvia.map(x => x.mm || 0));
   new Chart(document.getElementById('chart'), {
-    type:'bar',
-    data:{labels:d.lluvia.map(x => fdc(x.fecha)), datasets:[{data:d.lluvia.map(x => x.mm), backgroundColor:'#3182bd', borderRadius:3}]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c => `${c.parsed.y} mm`}}},
-      scales:{y:{beginAtZero:true, title:{display:true, text:'mm'}}, x:{ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:10}}}}
+    type:'bar', plugins:[valores],
+    data:{labels:d.lluvia.map(x => fdc(x.fecha)), datasets:[{data:d.lluvia.map(x => x.mm), backgroundColor:'#3182bd', borderRadius:2}]},
+    options:{responsive:true, maintainAspectRatio:false, layout:{padding:{top:6}},
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c => `${c.parsed.y} mm`}}},
+      scales:{y:{beginAtZero:true, suggestedMax: maxMm * 1.2, title:{display:true, text:'mm'}},
+              x:{ticks:{autoSkip:false, maxRotation:90, minRotation:90, font:{size:10}}}}}
   });
 
-  // ---- Movimientos
-  const lim = restaDias(hoy, 14);
-  document.getElementById('movs').innerHTML = ganado.filter(x => x.fecha >= lim).reverse().map(x =>
-    `<tr><td>${fdc(x.fecha)}</td><td><span class="tag ${esCom(x.labor) ? 'com' : 'pur'}">${esCom(x.labor) ? 'Comercial' : 'Puro'}</span></td><td>${x.pot ?? '—'}</td></tr>`
-  ).join('') || '<tr><td colspan="3">Sin movimientos registrados</td></tr>';
-
-  // ---- Descanso
+  // ---- Por lote
+  const lim = restaDias(hoy, 9);
+  [['com', esCom, uc], ['pur', esPuro, up]].forEach(([k, f, u]) => {
+    const pots = d.potreros.filter(p => f(p.tipo));
+    const listosL = pots.filter(p => p.listo === 'SI');
+    document.getElementById('res-' + k).innerHTML = u
+      ? `Está en el <b>potrero ${u.pot ?? '—'}</b> desde el ${fd(desde(f, u.pot))}.<br>
+         ${pots.length} potreros · <b>${listosL.length}</b> listos para entrar${listosL.length ? ': ' + listosL.sort((a,b)=>(b.dias||0)-(a.dias||0)).map(p => p.n).join(', ') : ''}.`
+      : 'Sin registros recientes.';
+    document.getElementById('movs-' + k).innerHTML = ganado.filter(x => f(x.labor) && x.fecha >= lim).reverse()
+      .map(x => `<tr><td>${fd(x.fecha)}</td><td>${x.pot ?? '—'}</td></tr>`).join('') || '<tr><td colspan="2">Sin movimientos</td></tr>';
+    document.getElementById('desc-' + k).innerHTML = pots.filter(p => p.estado === 'OTRO' && p.ug)
+      .sort((a,b) => (b.listo === 'SI') - (a.listo === 'SI') || (b.dias||0) - (a.dias||0))
+      .map(p => `<tr><td><b>${p.n}</b></td><td>${fdc(p.ug)}</td><td class="num">${p.dias ?? '—'}</td>
+        <td class="num">${r0(p.lluvia)}</td><td class="num">${r0(p.util)}</td>
+        <td>${p.listo === 'SI' ? '<span class="tag ok">✅ Listo</span>' : '<span class="tag no">Descansando</span>'}</td></tr>`)
+      .join('') || '<tr><td colspan="6">Sin datos</td></tr>';
+  });
   document.getElementById('crit').textContent =
     `Criterio "listo": ≥ ${m.dias_descanso} días de descanso y ≥ ${m.mm_minimo} mm de lluvia útil (lluvia caída hace más de ${m.dias_respuesta} días).`;
-  const desc = d.potreros.filter(p => p.estado === 'OTRO' && p.ug && esGanado(p.tipo))
-    .sort((a,b) => (b.listo === 'SI') - (a.listo === 'SI') || (b.dias||0) - (a.dias||0));
-  document.getElementById('desc').innerHTML = desc.map(p =>
-    `<tr><td><b>${p.n}</b></td><td><span class="tag ${esCom(p.tipo) ? 'com' : 'pur'}">${esCom(p.tipo) ? 'Comercial' : 'Puro'}</span></td>
-     <td>${fdc(p.ug)}</td><td class="num">${p.dias ?? '—'}</td><td class="num">${r0(p.lluvia)}</td><td class="num">${r0(p.util)}</td>
-     <td>${p.listo === 'SI' ? '<span class="tag ok">✅ Listo</span>' : '<span class="tag no">Descansando</span>'}</td></tr>`
-  ).join('') || '<tr><td colspan="7">Sin datos</td></tr>';
 }
 cargar();
 </script>
